@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>유튜브 포즈 게임</title>
+
+<!-- 유튜브 API -->
+<script src="https://www.youtube.com/iframe_api"></script>
+
+<!-- TensorFlow -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+
+<!-- Teachable Machine -->
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+
+<style>
+
+body{
+    margin:0;
+    padding:0;
+    background:#111;
+    color:white;
+    font-family:Arial;
+    text-align:center;
+}
+
+h1{
+    margin-top:20px;
+}
+
+.container{
+    display:flex;
+    justify-content:center;
+    gap:30px;
+    flex-wrap:wrap;
+    margin-top:20px;
+}
+
+.box{
+    background:#222;
+    padding:20px;
+    border-radius:20px;
+}
+
+#player{
+    width:640px;
+    height:360px;
+}
+
+canvas{
+    border:3px solid white;
+    border-radius:20px;
+}
+
+button{
+    padding:15px 30px;
+    font-size:20px;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    margin-top:20px;
+    background:#00bfff;
+    color:white;
+}
+
+#score{
+    font-size:40px;
+    color:#00ff99;
+    margin-top:20px;
+}
+
+#currentPose{
+    font-size:30px;
+    color:gold;
+    margin-top:15px;
+}
+
+#result{
+    font-size:30px;
+    margin-top:10px;
+}
+
+#label-container{
+    margin-top:15px;
+    text-align:left;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>🎮 유튜브 포즈 게임</h1>
+
+<button id="startBtn">
+게임 시작
+</button>
+
+<div id="score">
+점수 : 0
+</div>
+
+<div id="currentPose">
+현재 포즈 : REST
+</div>
+
+<div id="result"></div>
+
+<div class="container">
+
+    <!-- 유튜브 -->
+    <div class="box">
+
+        <h2>📺 유튜브 영상</h2>
+
+        <div id="player"></div>
+
+    </div>
+
+    <!-- 웹캠 -->
+    <div class="box">
+
+        <h2>📷 웹캠</h2>
+
+        <canvas id="canvas"></canvas>
+
+        <div id="label-container"></div>
+
+    </div>
+
+</div>
+
+<script>
+
+////////////////////////////////////////////////////
+// 중요
+////////////////////////////////////////////////////
+
+// 반드시 index.html 옆에
+// my_model 폴더 있어야 함
+
+const MODEL_URL = "my_model/";
+
+////////////////////////////////////////////////////
+// 변수
+////////////////////////////////////////////////////
+
+let model;
+let webcam;
+let ctx;
+let labelContainer;
+let maxPredictions;
+
+let player;
+
+let score = 0;
+
+let gameStarted = false;
+
+let currentTargetPose = "REST";
+
+let lastScoreTime = 0;
+
+////////////////////////////////////////////////////
+// 유튜브 API
+////////////////////////////////////////////////////
+
+function onYouTubeIframeAPIReady(){
+
+    player = new YT.Player('player', {
+
+        height: '360',
+        width: '640',
+
+        videoId: 'oRr5hxr_bRA',
+
+        playerVars: {
+            autoplay: 0,
+            controls: 1
+        },
+
+        events: {
+
+            onReady: function(){
+
+                console.log("유튜브 준비 완료");
+
+            }
+
+        }
+
+    });
+
+}
+
+////////////////////////////////////////////////////
+// 시작 버튼
+////////////////////////////////////////////////////
+
+document.getElementById("startBtn").addEventListener("click", async function(){
+
+    if(gameStarted){
+        return;
+    }
+
+    gameStarted = true;
+
+    try{
+
+        // 모델 로드
+        await loadModel();
+
+        // 웹캠 시작
+        await setupWebcam();
+
+        // 유튜브 재생
+        player.playVideo();
+
+        // 루프 시작
+        loop();
+
+        console.log("게임 시작 성공");
+
+    }catch(error){
+
+        console.error(error);
+
+        alert("오류 발생!\nF12 → Console 확인");
+
+    }
+
+});
+
+////////////////////////////////////////////////////
+// 모델 로드
+////////////////////////////////////////////////////
+
+async function loadModel(){
+
+    try{
+
+        const modelURL = MODEL_URL + "model.json";
+
+        const metadataURL = MODEL_URL + "metadata.json";
+
+        console.log("모델 로딩중...");
+        console.log(modelURL);
+
+        model = await tmPose.load(modelURL, metadataURL);
+
+        maxPredictions = model.getTotalClasses();
+
+        labelContainer =
+            document.getElementById("label-container");
+
+        for(let i=0; i<maxPredictions; i++){
+
+            labelContainer.appendChild(
+                document.createElement("div")
+            );
+
+        }
+
+        console.log("모델 로드 성공");
+
+    }catch(error){
+
+        console.error(error);
+
+        alert("모델 로드 실패!\nmy_model 폴더 확인!");
+
+    }
+
+}
+
+////////////////////////////////////////////////////
+// 웹캠 시작
+////////////////////////////////////////////////////
+
+async function setupWebcam(){
+
+    const size = 300;
+
+    const flip = true;
+
+    webcam = new tmPose.Webcam(size, size, flip);
+
+    await webcam.setup();
+
+    await webcam.play();
+
+    const canvas =
+        document.getElementById("canvas");
+
+    canvas.width = size;
+    canvas.height = size;
+
+    ctx = canvas.getContext("2d");
+
+    console.log("웹캠 시작 성공");
+
+}
+
+////////////////////////////////////////////////////
+// 포즈 시간표
+////////////////////////////////////////////////////
+
+// 영상 시간에 따라
+// 정답 포즈 바뀜
+
+const poseTimeline = [
+
+    { time: 0, pose: "REST" },
+
+    { time: 5, pose: "SAY HI" },
+
+    { time: 10, pose: "WALK" },
+
+    { time: 15, pose: "SWING" },
+
+    { time: 20, pose: "PAW" },
+
+    { time: 25, pose: "JUMP" },
+
+    { time: 30, pose: "REST" }
+
+];
+
+////////////////////////////////////////////////////
+// 메인 루프
+////////////////////////////////////////////////////
+
+async function loop(){
+
+    webcam.update();
+
+    await predict();
+
+    updateTargetPose();
+
+    window.requestAnimationFrame(loop);
+
+}
+
+////////////////////////////////////////////////////
+// 현재 포즈 가져오기
+////////////////////////////////////////////////////
+
+function updateTargetPose(){
+
+    if(!player){
+        return;
+    }
+
+    const currentTime =
+        player.getCurrentTime();
+
+    for(
+        let i = poseTimeline.length - 1;
+        i >= 0;
+        i--
+    ){
+
+        if(currentTime >= poseTimeline[i].time){
+
+            currentTargetPose =
+                poseTimeline[i].pose;
+
+            document.getElementById(
+                "currentPose"
+            ).innerHTML =
+                "현재 포즈 : " +
+                currentTargetPose;
+
+            break;
+
+        }
+
+    }
+
+}
+
+////////////////////////////////////////////////////
+// 포즈 예측
+////////////////////////////////////////////////////
+
+async function predict(){
+
+    const { pose, posenetOutput } =
+        await model.estimatePose(webcam.canvas);
+
+    const prediction =
+        await model.predict(posenetOutput);
+
+    let bestClass = "";
+
+    let bestProbability = 0;
+
+    for(let i=0; i<maxPredictions; i++){
+
+        const className =
+            prediction[i].className;
+
+        const probability =
+            prediction[i].probability;
+
+        labelContainer.childNodes[i].innerHTML =
+            className +
+            " : " +
+            probability.toFixed(2);
+
+        if(probability > bestProbability){
+
+            bestProbability = probability;
+
+            bestClass = className;
+
+        }
+
+    }
+
+    ////////////////////////////////////////////////////
+    // 정답 체크
+    ////////////////////////////////////////////////////
+
+    if(
+        bestClass === currentTargetPose &&
+        bestProbability > 0.90
+    ){
+
+        document.getElementById("result")
+            .innerHTML = "✅ 성공";
+
+        const now = Date.now();
+
+        if(now - lastScoreTime > 1000){
+
+            score += 10;
+
+            document.getElementById("score")
+                .innerHTML =
+                "점수 : " + score;
+
+            lastScoreTime = now;
+
+        }
+
+    }else{
+
+        document.getElementById("result")
+            .innerHTML = "❌ 실패";
+
+    }
+
+    drawPose(pose);
+
+}
+
+////////////////////////////////////////////////////
+// 포즈 그리기
+////////////////////////////////////////////////////
+
+function drawPose(pose){
+
+    if(webcam.canvas){
+
+        ctx.drawImage(
+            webcam.canvas,
+            0,
+            0
+        );
+
+        if(pose){
+
+            const minPartConfidence = 0.5;
+
+            tmPose.drawKeypoints(
+                pose.keypoints,
+                minPartConfidence,
+                ctx
+            );
+
+            tmPose.drawSkeleton(
+                pose.keypoints,
+                minPartConfidence,
+                ctx
+            );
+
+        }
+
+    }
+
+}
+
+</script>
+
+</body>
+</html>
