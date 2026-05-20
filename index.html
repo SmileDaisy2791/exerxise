@@ -1,187 +1,251 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Dance Pose Game</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <script src="https://www.youtube.com/iframe_api"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+<title>Teachable Machine Dance Game</title>
 
-  <style>
-    body{
-      margin:0;
-      padding:0;
-      background:#111;
-      color:white;
-      font-family:Arial, sans-serif;
-      text-align:center;
-    }
+<!-- 유튜브 API -->
+<script src="https://www.youtube.com/iframe_api"></script>
 
-    h1{
-      margin-top:20px;
-    }
+<!-- 티처블 머신 -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
 
-    .container{
-      display:flex;
-      justify-content:center;
-      gap:30px;
-      margin-top:20px;
-      flex-wrap:wrap;
-    }
+<style>
 
-    .box{
-      background:#1e1e1e;
-      padding:20px;
-      border-radius:20px;
-      box-shadow:0 0 15px rgba(255,255,255,0.1);
-    }
+body{
+    margin:0;
+    padding:0;
+    background:#111;
+    color:white;
+    font-family:Arial;
+    text-align:center;
+}
 
-    #player{
-      width:640px;
-      height:360px;
-      margin:auto;
-    }
+h1{
+    margin-top:20px;
+}
 
-    canvas{
-      border-radius:20px;
-      border:3px solid white;
-    }
+.container{
+    display:flex;
+    justify-content:center;
+    gap:30px;
+    margin-top:20px;
+    flex-wrap:wrap;
+}
 
-    #score{
-      font-size:40px;
-      font-weight:bold;
-      color:#00ff99;
-      margin-top:10px;
-    }
+.box{
+    background:#222;
+    padding:20px;
+    border-radius:20px;
+}
 
-    #currentPose{
-      font-size:28px;
-      margin-top:15px;
-      color:#ffd700;
-    }
+#player{
+    width:640px;
+    height:360px;
+}
 
-    #result{
-      font-size:32px;
-      margin-top:15px;
-      font-weight:bold;
-    }
+canvas{
+    border:3px solid white;
+    border-radius:20px;
+}
 
-    button{
-      padding:12px 30px;
-      font-size:20px;
-      border:none;
-      border-radius:12px;
-      cursor:pointer;
-      background:#00ccff;
-      color:white;
-      margin-top:20px;
-    }
+button{
+    padding:15px 30px;
+    font-size:20px;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    margin-top:20px;
+}
 
-    #label-container{
-      margin-top:15px;
-      text-align:left;
-      width:250px;
-      margin-left:auto;
-      margin-right:auto;
-    }
-  </style>
+#score{
+    font-size:35px;
+    color:#00ff99;
+    margin-top:20px;
+}
+
+#currentPose{
+    font-size:28px;
+    color:gold;
+    margin-top:10px;
+}
+
+#result{
+    font-size:30px;
+    margin-top:10px;
+}
+
+#label-container{
+    margin-top:15px;
+}
+
+</style>
+
 </head>
 
 <body>
 
-  <h1>🎮 유튜브 포즈 게임</h1>
+<h1>🎮 유튜브 포즈 게임</h1>
 
-  <button onclick="startGame()">게임 시작</button>
+<button id="startBtn">게임 시작</button>
 
-  <div id="score">점수 : 0</div>
-  <div id="currentPose">현재 동작 : 대기중</div>
-  <div id="result"></div>
+<div id="score">점수 : 0</div>
 
-  <div class="container">
+<div id="currentPose">
+현재 포즈 : REST
+</div>
+
+<div id="result"></div>
+
+<div class="container">
 
     <div class="box">
-      <h2>📺 유튜브 영상</h2>
-      <div id="player"></div>
+
+        <h2>📺 유튜브 영상</h2>
+
+        <div id="player"></div>
+
     </div>
 
     <div class="box">
-      <h2>📷 웹캠</h2>
-      <canvas id="canvas"></canvas>
-      <div id="label-container"></div>
+
+        <h2>📷 웹캠</h2>
+
+        <canvas id="canvas"></canvas>
+
+        <div id="label-container"></div>
+
     </div>
 
-  </div>
+</div>
 
 <script>
 
-  // =========================
-  // 유튜브 설정
-  // =========================
+//////////////////////////////////////////////////
+// 기본 변수
+//////////////////////////////////////////////////
 
-  let player;
+const MODEL_URL = "./my_model/";
 
-  function onYouTubeIframeAPIReady() {
+let model;
+let webcam;
+let ctx;
+let labelContainer;
+let maxPredictions;
+
+let player;
+
+let score = 0;
+
+let gameStarted = false;
+
+let currentTargetPose = "REST";
+
+let lastScoreTime = 0;
+
+//////////////////////////////////////////////////
+// 유튜브 생성
+//////////////////////////////////////////////////
+
+function onYouTubeIframeAPIReady(){
+
     player = new YT.Player('player', {
-      height: '360',
-      width: '640',
-      videoId: 'oRr5hxr_bRA',
-      playerVars: {
-        autoplay: 0,
-        controls: 1
-      }
+
+        height: '360',
+        width: '640',
+
+        videoId: 'oRr5hxr_bRA',
+
+        playerVars: {
+            autoplay: 0,
+            controls: 1
+        },
+
+        events: {
+
+            onReady: function(){
+
+                console.log("유튜브 준비 완료");
+
+            }
+
+        }
+
     });
-  }
 
-  // =========================
-  // 티처블 머신 설정
-  // =========================
+}
 
-  const URL = "./my_model/";
+//////////////////////////////////////////////////
+// 시작 버튼
+//////////////////////////////////////////////////
 
-  let model, webcam, ctx, labelContainer, maxPredictions;
+document.getElementById("startBtn").addEventListener("click", async () => {
 
-  let score = 0;
+    if(gameStarted){
+        return;
+    }
 
-  // 현재 정답 포즈
-  let targetPose = "REST";
+    gameStarted = true;
 
-  // 포즈 순서 시간표
-  // 영상 타이밍에 맞게 수정 가능
-  const poseTimeline = [
-    { time: 0, pose: "REST" },
-    { time: 5, pose: "SAY HI" },
-    { time: 10, pose: "WALK" },
-    { time: 15, pose: "SWING" },
-    { time: 20, pose: "PAW" },
-    { time: 25, pose: "JUMP" },
-    { time: 30, pose: "REST" },
-    { time: 35, pose: "SAY HI" },
-    { time: 40, pose: "WALK" },
-    { time: 45, pose: "SWING" },
-    { time: 50, pose: "PAW" },
-    { time: 55, pose: "JUMP" }
-  ];
+    try{
 
-  async function startGame() {
+        // 1. 모델 로드
+        await loadModel();
 
-    await init();
+        // 2. 웹캠 시작
+        await setupWebcam();
 
-    player.playVideo();
+        // 3. 영상 재생
+        player.playVideo();
 
-    setInterval(updateTargetPose, 500);
+        // 4. 루프 시작
+        loop();
 
-  }
+        console.log("게임 시작 성공");
 
-  async function init() {
+    }catch(error){
 
-    const modelURL = URL + "model.json";
-    const metadataURL = URL + "metadata.json";
+        console.error(error);
+
+        alert("오류 발생!\nF12 → Console 확인");
+
+    }
+
+});
+
+//////////////////////////////////////////////////
+// 모델 로드
+//////////////////////////////////////////////////
+
+async function loadModel(){
+
+    const modelURL = MODEL_URL + "model.json";
+    const metadataURL = MODEL_URL + "metadata.json";
 
     model = await tmPose.load(modelURL, metadataURL);
 
     maxPredictions = model.getTotalClasses();
+
+    labelContainer = document.getElementById("label-container");
+
+    for(let i=0; i<maxPredictions; i++){
+
+        labelContainer.appendChild(document.createElement("div"));
+
+    }
+
+    console.log("모델 로드 완료");
+
+}
+
+//////////////////////////////////////////////////
+// 웹캠 설정
+//////////////////////////////////////////////////
+
+async function setupWebcam(){
 
     const size = 300;
     const flip = true;
@@ -189,9 +253,8 @@
     webcam = new tmPose.Webcam(size, size, flip);
 
     await webcam.setup();
-    await webcam.play();
 
-    window.requestAnimationFrame(loop);
+    await webcam.play();
 
     const canvas = document.getElementById("canvas");
 
@@ -200,140 +263,168 @@
 
     ctx = canvas.getContext("2d");
 
-    labelContainer = document.getElementById("label-container");
+    console.log("웹캠 시작 완료");
 
-    for (let i = 0; i < maxPredictions; i++) {
-      labelContainer.appendChild(document.createElement("div"));
-    }
-  }
+}
 
-  async function loop() {
+//////////////////////////////////////////////////
+// 포즈 시간표
+//////////////////////////////////////////////////
+
+const poseTimeline = [
+
+    { time: 0, pose: "REST" },
+    { time: 5, pose: "SAY HI" },
+    { time: 10, pose: "WALK" },
+    { time: 15, pose: "SWING" },
+    { time: 20, pose: "PAW" },
+    { time: 25, pose: "JUMP" }
+
+];
+
+//////////////////////////////////////////////////
+// 메인 루프
+//////////////////////////////////////////////////
+
+async function loop(){
 
     webcam.update();
 
     await predict();
 
+    updateCurrentPose();
+
     window.requestAnimationFrame(loop);
-  }
 
-  // =========================
-  // 현재 영상 시간에 맞는 포즈 찾기
-  // =========================
+}
 
-  function updateTargetPose() {
+//////////////////////////////////////////////////
+// 현재 영상 시간에 맞는 포즈 가져오기
+//////////////////////////////////////////////////
 
-    if (!player || typeof player.getCurrentTime !== "function") return;
+function updateCurrentPose(){
+
+    if(!player) return;
 
     const currentTime = player.getCurrentTime();
 
-    for (let i = poseTimeline.length - 1; i >= 0; i--) {
+    for(let i = poseTimeline.length - 1; i >= 0; i--){
 
-      if (currentTime >= poseTimeline[i].time) {
+        if(currentTime >= poseTimeline[i].time){
 
-        targetPose = poseTimeline[i].pose;
+            currentTargetPose = poseTimeline[i].pose;
 
-        document.getElementById("currentPose").innerHTML =
-          "현재 동작 : " + targetPose;
+            document.getElementById("currentPose").innerHTML =
+                "현재 포즈 : " + currentTargetPose;
 
-        break;
-      }
+            break;
+
+        }
+
     }
-  }
 
-  // =========================
-  // 예측
-  // =========================
+}
 
-  let lastCorrectTime = 0;
+//////////////////////////////////////////////////
+// 예측
+//////////////////////////////////////////////////
 
-  async function predict() {
+async function predict(){
 
     const { pose, posenetOutput } =
-      await model.estimatePose(webcam.canvas);
+        await model.estimatePose(webcam.canvas);
 
-    const prediction = await model.predict(posenetOutput);
+    const prediction =
+        await model.predict(posenetOutput);
 
     let bestClass = "";
     let bestProbability = 0;
 
-    for (let i = 0; i < maxPredictions; i++) {
+    for(let i=0; i<maxPredictions; i++){
 
-      const classPrediction =
-        prediction[i].className +
-        " : " +
-        prediction[i].probability.toFixed(2);
+        const className = prediction[i].className;
 
-      labelContainer.childNodes[i].innerHTML = classPrediction;
+        const probability = prediction[i].probability;
 
-      if (prediction[i].probability > bestProbability) {
+        labelContainer.childNodes[i].innerHTML =
+            className + " : " + probability.toFixed(2);
 
-        bestProbability = prediction[i].probability;
-        bestClass = prediction[i].className;
-      }
+        if(probability > bestProbability){
+
+            bestProbability = probability;
+            bestClass = className;
+
+        }
+
     }
 
-    // =========================
+    //////////////////////////////////////////////////
     // 정답 체크
-    // =========================
+    //////////////////////////////////////////////////
 
-    if (
-      bestClass === targetPose &&
-      bestProbability > 0.90
-    ) {
-
-      const now = Date.now();
-
-      // 1초마다 점수 추가
-      if (now - lastCorrectTime > 1000) {
-
-        score += 10;
-
-        document.getElementById("score").innerHTML =
-          "점수 : " + score;
+    if(
+        bestClass === currentTargetPose &&
+        bestProbability > 0.90
+    ){
 
         document.getElementById("result").innerHTML =
-          "✅ 성공!";
+            "✅ 성공";
 
-        lastCorrectTime = now;
-      }
+        const now = Date.now();
 
-    } else {
+        if(now - lastScoreTime > 1000){
 
-      document.getElementById("result").innerHTML =
-        "❌ 다른 동작!";
+            score += 10;
+
+            document.getElementById("score").innerHTML =
+                "점수 : " + score;
+
+            lastScoreTime = now;
+
+        }
+
+    }else{
+
+        document.getElementById("result").innerHTML =
+            "❌ 실패";
+
     }
 
     drawPose(pose);
-  }
 
-  // =========================
-  // 포즈 그리기
-  // =========================
+}
 
-  function drawPose(pose) {
+//////////////////////////////////////////////////
+// 포즈 그리기
+//////////////////////////////////////////////////
 
-    if (webcam.canvas) {
+function drawPose(pose){
 
-      ctx.drawImage(webcam.canvas, 0, 0);
+    if(webcam.canvas){
 
-      if (pose) {
+        ctx.drawImage(webcam.canvas, 0, 0);
 
-        const minPartConfidence = 0.5;
+        if(pose){
 
-        tmPose.drawKeypoints(
-          pose.keypoints,
-          minPartConfidence,
-          ctx
-        );
+            const minPartConfidence = 0.5;
 
-        tmPose.drawSkeleton(
-          pose.keypoints,
-          minPartConfidence,
-          ctx
-        );
-      }
+            tmPose.drawKeypoints(
+                pose.keypoints,
+                minPartConfidence,
+                ctx
+            );
+
+            tmPose.drawSkeleton(
+                pose.keypoints,
+                minPartConfidence,
+                ctx
+            );
+
+        }
+
     }
-  }
+
+}
 
 </script>
 
